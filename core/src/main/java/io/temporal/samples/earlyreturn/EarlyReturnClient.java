@@ -19,7 +19,12 @@
 
 package io.temporal.samples.earlyreturn;
 
-import io.temporal.client.*;
+import io.temporal.client.UpdateWithStartWorkflowOperation;
+import io.temporal.client.WorkflowClient;
+import io.temporal.client.WorkflowOptions;
+import io.temporal.client.WorkflowStub;
+import io.temporal.client.WorkflowUpdateHandle;
+import io.temporal.client.WorkflowUpdateStage;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 
 public class EarlyReturnClient {
@@ -44,40 +49,60 @@ public class EarlyReturnClient {
             "Bob", "Alice",
             1000); // Change this amount to a negative number to have initTransaction fail
 
-    WorkflowOptions options = buildWorkflowOptions();
-    TransactionWorkflow workflow = client.newWorkflowStub(TransactionWorkflow.class, options);
+    long totalwfruntime = 0;
+    int max_attempts = 100;
+    long totalearlyreturnruntime = 0;
+    for (int i = 0; i < max_attempts; i++) {
+      TxResult updateResult = null;
+      try {
+        WorkflowOptions options = buildWorkflowOptions();
+        TransactionWorkflow workflow = client.newWorkflowStub(TransactionWorkflow.class, options);
 
-    System.out.println("Starting workflow with UpdateWithStart");
+        // System.out.println("Starting workflow with UpdateWithStart");
 
-    UpdateWithStartWorkflowOperation<TxResult> updateOp =
-        UpdateWithStartWorkflowOperation.newBuilder(workflow::returnInitResult)
-            .setWaitForStage(WorkflowUpdateStage.COMPLETED) // Wait for update to complete
-            .build();
+        UpdateWithStartWorkflowOperation<TxResult> updateOp =
+            UpdateWithStartWorkflowOperation.newBuilder(workflow::returnInitResult)
+                .setWaitForStage(WorkflowUpdateStage.COMPLETED) // Wait for update to complete
+                .build();
+        long starttime = System.currentTimeMillis();
 
-    TxResult updateResult = null;
-    try {
-      WorkflowUpdateHandle<TxResult> updateHandle =
-          WorkflowClient.updateWithStart(workflow::processTransaction, txRequest, updateOp);
+        WorkflowUpdateHandle<TxResult> updateHandle =
+            WorkflowClient.updateWithStart(workflow::processTransaction, txRequest, updateOp);
 
-      updateResult = updateHandle.getResultAsync().get();
+        updateResult = updateHandle.getResultAsync().get();
+        long earlyreturnendtime = System.currentTimeMillis();
+        totalearlyreturnruntime += earlyreturnendtime - starttime;
 
-      System.out.println(
-          "Workflow initialized with result: "
-              + updateResult.getStatus()
-              + " (transactionId: "
-              + updateResult.getTransactionId()
-              + ")");
+        // System.out.println(
+        //     "Workflow initialized with result: "
+        //         + updateResult.getStatus()
+        //         + " (transactionId: "
+        //         + updateResult.getTransactionId()
+        //         + ")");
 
-      TxResult result = WorkflowStub.fromTyped(workflow).getResult(TxResult.class);
-      System.out.println(
-          "Workflow completed with result: "
-              + result.getStatus()
-              + " (transactionId: "
-              + result.getTransactionId()
-              + ")");
-    } catch (Exception e) {
-      System.err.println("Transaction initialization failed: " + e.getMessage());
+        TxResult result = WorkflowStub.fromTyped(workflow).getResult(TxResult.class);
+        long wfendtime = System.currentTimeMillis();
+        totalwfruntime += wfendtime - starttime;
+
+        System.out.println(
+            "Workflow completed with result: "
+                + result.getStatus()
+                + ", update status: "
+                + updateResult.getStatus()
+                + " (transactionId: "
+                + result.getTransactionId()
+                + ")");
+      } catch (Exception e) {
+        System.err.println("Transaction initialization failed: " + e.getMessage());
+      }
     }
+
+    long averagewfruntime = totalwfruntime / max_attempts;
+    long averageearlyreturnruntime = totalearlyreturnruntime / max_attempts;
+    System.out.println(
+        "Average Early Return response time: " + averageearlyreturnruntime + " milliseconds");
+    System.out.println("Average Workflow response time: " + averagewfruntime + " milliseconds");
+    System.out.println("^ over " + max_attempts + " attempts.");
   }
 
   // Build WorkflowOptions with task queue and unique ID
