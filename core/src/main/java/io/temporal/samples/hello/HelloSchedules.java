@@ -257,7 +257,7 @@ public class HelloSchedules {
       if (state.getRemainingActions() == 0) {
         break;
       }
-      Thread.sleep(5000);
+      Thread.sleep(500000);
     }
     // Delete the schedule once the sample is done
     handle.delete();

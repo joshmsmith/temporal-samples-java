@@ -36,6 +36,8 @@ public class EarlyReturnWorker {
     Worker worker = factory.newWorker(TASK_QUEUE);
 
     worker.registerWorkflowImplementationTypes(TransactionWorkflowImpl.class);
+    worker.registerWorkflowImplementationTypes(TransactionWorkflowNoDelayImpl.class);
+    worker.registerWorkflowImplementationTypes(TransactionWorkflowMoreDelayImpl.class);
     worker.registerActivitiesImplementations(new TransactionActivitiesImpl());
 
     factory.start();

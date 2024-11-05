@@ -30,10 +30,13 @@ import io.temporal.serviceclient.WorkflowServiceStubs;
 public class EarlyReturnClient {
   private static final String TASK_QUEUE = "EarlyReturnTaskQueue";
   private static final String WORKFLOW_ID_PREFIX = "early-return-workflow-";
+  private static final int MAX_ATTEMPTS = 100;
 
   public static void main(String[] args) {
     WorkflowClient client = setupWorkflowClient();
+    runWorkflowWithUpdateWithStartNoDelay(client);
     runWorkflowWithUpdateWithStart(client);
+    runWorkflowWithUpdateWithStartMoreDelay(client);
   }
 
   // Set up the WorkflowClient
@@ -50,12 +53,11 @@ public class EarlyReturnClient {
             1000); // Change this amount to a negative number to have initTransaction fail
 
     long totalwfruntime = 0;
-    int max_attempts = 100;
     long totalearlyreturnruntime = 0;
-    for (int i = 0; i < max_attempts; i++) {
+    for (int i = 0; i < MAX_ATTEMPTS; i++) {
       TxResult updateResult = null;
       try {
-        WorkflowOptions options = buildWorkflowOptions();
+        WorkflowOptions options = buildWorkflowOptionsSomeDelay();
         TransactionWorkflow workflow = client.newWorkflowStub(TransactionWorkflow.class, options);
 
         // System.out.println("Starting workflow with UpdateWithStart");
@@ -84,32 +86,186 @@ public class EarlyReturnClient {
         long wfendtime = System.currentTimeMillis();
         totalwfruntime += wfendtime - starttime;
 
-        System.out.println(
-            "Workflow completed with result: "
-                + result.getStatus()
-                + ", update status: "
-                + updateResult.getStatus()
-                + " (transactionId: "
-                + result.getTransactionId()
-                + ")");
+        if (result == null) { // please stop
+          System.out.println(
+              "Workflow completed with result: "
+                  + result.getStatus()
+                  + ", update status: "
+                  + updateResult.getStatus()
+                  + " (transactionId: "
+                  + result.getTransactionId()
+                  + ")");
+        }
       } catch (Exception e) {
         System.err.println("Transaction initialization failed: " + e.getMessage());
       }
     }
 
-    long averagewfruntime = totalwfruntime / max_attempts;
-    long averageearlyreturnruntime = totalearlyreturnruntime / max_attempts;
+    long averagewfruntime = totalwfruntime / MAX_ATTEMPTS;
+    long averageearlyreturnruntime = totalearlyreturnruntime / MAX_ATTEMPTS;
+    System.out.println("Latency results with Some Delay over [" + MAX_ATTEMPTS + "] attempts.");
     System.out.println(
-        "Average Early Return response time: " + averageearlyreturnruntime + " milliseconds");
-    System.out.println("Average Workflow response time: " + averagewfruntime + " milliseconds");
-    System.out.println("^ over " + max_attempts + " attempts.");
+        " - Average Early Return response time: " + averageearlyreturnruntime + " milliseconds");
+    System.out.println(" - Average Workflow response time: " + averagewfruntime + " milliseconds");
+  }
+
+  // Run workflow using 'updateWithStart'
+  private static void runWorkflowWithUpdateWithStartNoDelay(WorkflowClient client) {
+    TransactionRequest txRequest =
+        new TransactionRequest(
+            "Bob", "Alice",
+            1000); // Change this amount to a negative number to have initTransaction fail
+
+    long totalwfruntime = 0;
+    long totalearlyreturnruntime = 0;
+    for (int i = 0; i < MAX_ATTEMPTS; i++) {
+      TxResult updateResult = null;
+      try {
+        WorkflowOptions options = buildWorkflowOptionsNoDelay();
+        TransactionWorkflowNoDelay workflow =
+            client.newWorkflowStub(TransactionWorkflowNoDelay.class, options);
+
+        // System.out.println("Starting workflow with UpdateWithStart");
+
+        UpdateWithStartWorkflowOperation<TxResult> updateOp =
+            UpdateWithStartWorkflowOperation.newBuilder(workflow::returnInitResult)
+                .setWaitForStage(WorkflowUpdateStage.COMPLETED) // Wait for update to complete
+                .build();
+        long starttime = System.currentTimeMillis();
+
+        WorkflowUpdateHandle<TxResult> updateHandle =
+            WorkflowClient.updateWithStart(workflow::processTransaction, txRequest, updateOp);
+
+        updateResult = updateHandle.getResultAsync().get();
+        long earlyreturnendtime = System.currentTimeMillis();
+        totalearlyreturnruntime += earlyreturnendtime - starttime;
+
+        // System.out.println(
+        //     "Workflow initialized with result: "
+        //         + updateResult.getStatus()
+        //         + " (transactionId: "
+        //         + updateResult.getTransactionId()
+        //         + ")");
+
+        TxResult result = WorkflowStub.fromTyped(workflow).getResult(TxResult.class);
+        long wfendtime = System.currentTimeMillis();
+        totalwfruntime += wfendtime - starttime;
+
+        if (result == null) { // please stop
+          System.out.println(
+              "Workflow completed with result: "
+                  + result.getStatus()
+                  + ", update status: "
+                  + updateResult.getStatus()
+                  + " (transactionId: "
+                  + result.getTransactionId()
+                  + ")");
+        }
+      } catch (Exception e) {
+        System.err.println("Transaction initialization failed: " + e.getMessage());
+      }
+    }
+
+    long averagewfruntime = totalwfruntime / MAX_ATTEMPTS;
+    long averageearlyreturnruntime = totalearlyreturnruntime / MAX_ATTEMPTS;
+    System.out.println("Latency results with No Delay over [" + MAX_ATTEMPTS + "] attempts.");
+    System.out.println(
+        " - Average Early Return response time with No Delay: "
+            + averageearlyreturnruntime
+            + " milliseconds");
+    System.out.println(
+        " - Average Workflow response time with No Delay: " + averagewfruntime + " milliseconds");
+  }
+
+  // Run workflow using 'updateWithStart'
+  private static void runWorkflowWithUpdateWithStartMoreDelay(WorkflowClient client) {
+    TransactionRequest txRequest =
+        new TransactionRequest(
+            "Bob", "Alice",
+            1000); // Change this amount to a negative number to have initTransaction fail
+
+    long totalwfruntime = 0;
+    long totalearlyreturnruntime = 0;
+    for (int i = 0; i < MAX_ATTEMPTS; i++) {
+      TxResult updateResult = null;
+      try {
+        WorkflowOptions options = buildWorkflowOptionsMoreDelay();
+        TransactionWorkflowMoreDelay workflow =
+            client.newWorkflowStub(TransactionWorkflowMoreDelay.class, options);
+
+        // System.out.println("Starting workflow with UpdateWithStart");
+
+        UpdateWithStartWorkflowOperation<TxResult> updateOp =
+            UpdateWithStartWorkflowOperation.newBuilder(workflow::returnInitResult)
+                .setWaitForStage(WorkflowUpdateStage.COMPLETED) // Wait for update to complete
+                .build();
+        long starttime = System.currentTimeMillis();
+
+        WorkflowUpdateHandle<TxResult> updateHandle =
+            WorkflowClient.updateWithStart(workflow::processTransaction, txRequest, updateOp);
+
+        updateResult = updateHandle.getResultAsync().get();
+        long earlyreturnendtime = System.currentTimeMillis();
+        totalearlyreturnruntime += earlyreturnendtime - starttime;
+
+        // System.out.println(
+        //     "Workflow initialized with result: "
+        //         + updateResult.getStatus()
+        //         + " (transactionId: "
+        //         + updateResult.getTransactionId()
+        //         + ")");
+
+        TxResult result = WorkflowStub.fromTyped(workflow).getResult(TxResult.class);
+        long wfendtime = System.currentTimeMillis();
+        totalwfruntime += wfendtime - starttime;
+
+        if (result == null) { // please stop
+          System.out.println(
+              "Workflow completed with result: "
+                  + result.getStatus()
+                  + ", update status: "
+                  + updateResult.getStatus()
+                  + " (transactionId: "
+                  + result.getTransactionId()
+                  + ")");
+        }
+      } catch (Exception e) {
+        System.err.println("Transaction initialization failed: " + e.getMessage());
+      }
+    }
+
+    long averagewfruntime = totalwfruntime / MAX_ATTEMPTS;
+    long averageearlyreturnruntime = totalearlyreturnruntime / MAX_ATTEMPTS;
+    System.out.println("Latency results with More Delay over [" + MAX_ATTEMPTS + "] attempts.");
+    System.out.println(
+        " - Average Early Return response time with More Delay: "
+            + averageearlyreturnruntime
+            + " milliseconds");
+    System.out.println(
+        " - Average Workflow response time with More Delay: " + averagewfruntime + " milliseconds");
   }
 
   // Build WorkflowOptions with task queue and unique ID
-  private static WorkflowOptions buildWorkflowOptions() {
+  private static WorkflowOptions buildWorkflowOptionsSomeDelay() {
     return WorkflowOptions.newBuilder()
         .setTaskQueue(TASK_QUEUE)
-        .setWorkflowId(WORKFLOW_ID_PREFIX + System.currentTimeMillis())
+        .setWorkflowId(WORKFLOW_ID_PREFIX + "SomeDelay-" + System.currentTimeMillis())
+        .build();
+  }
+
+  // Build WorkflowOptions with task queue and unique ID
+  private static WorkflowOptions buildWorkflowOptionsNoDelay() {
+    return WorkflowOptions.newBuilder()
+        .setTaskQueue(TASK_QUEUE)
+        .setWorkflowId(WORKFLOW_ID_PREFIX + "NoDelay-" + System.currentTimeMillis())
+        .build();
+  }
+
+  // Build WorkflowOptions with task queue and unique ID
+  private static WorkflowOptions buildWorkflowOptionsMoreDelay() {
+    return WorkflowOptions.newBuilder()
+        .setTaskQueue(TASK_QUEUE)
+        .setWorkflowId(WORKFLOW_ID_PREFIX + "MoreDelay-" + System.currentTimeMillis())
         .build();
   }
 }

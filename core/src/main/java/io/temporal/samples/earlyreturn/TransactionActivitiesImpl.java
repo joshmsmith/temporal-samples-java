@@ -22,14 +22,57 @@ package io.temporal.samples.earlyreturn;
 import io.temporal.failure.ApplicationFailure;
 
 public class TransactionActivitiesImpl implements TransactionActivities {
-  long sleepmult = 10; // zero or 10
+
+  @Override
+  public Transaction mintTransactionIdNoDelay(TransactionRequest request) {
+    // System.out.println("Minting transaction ID");
+    // Simulate transaction ID generation
+    String txId = "TXID" + String.format("%010d", (long) (Math.random() * 1_000_000_0000L));
+
+    // System.out.println("Transaction ID minted: " + txId);
+    return new Transaction(
+        txId, request.getSourceAccount(), request.getTargetAccount(), request.getAmount());
+  }
+
+  @Override
+  public Transaction initTransactionNoDelay(Transaction tx) {
+    // System.out.println("Initializing transaction");
+
+    if (tx.getAmount() <= 0) {
+      // System.out.println("Invalid amount: " + tx.getAmount());
+      throw ApplicationFailure.newNonRetryableFailure(
+          "Non-retryable Activity Failure: Invalid Amount", "InvalidAmount");
+    }
+
+    return tx;
+  }
+
+  @Override
+  public void cancelTransactionNoDelay(Transaction tx) {
+    // System.out.println("Cancelling transaction");
+
+    // System.out.println("Transaction cancelled");
+  }
+
+  @Override
+  public void completeTransactionNoDelay(Transaction tx) {
+    // System.out.println(
+    //     "Sending $"
+    //         + tx.getAmount()
+    //         + " from "
+    //         + tx.getSourceAccount()
+    //         + " to "
+    //         + tx.getTargetAccount());
+
+    // System.out.println("Transaction completed successfully");
+  }
 
   @Override
   public Transaction mintTransactionId(TransactionRequest request) {
     // System.out.println("Minting transaction ID");
     // Simulate transaction ID generation
     String txId = "TXID" + String.format("%010d", (long) (Math.random() * 1_000_000_0000L));
-    sleep(1 * sleepmult);
+    sleep(10);
     // System.out.println("Transaction ID minted: " + txId);
     return new Transaction(
         txId, request.getSourceAccount(), request.getTargetAccount(), request.getAmount());
@@ -37,36 +80,81 @@ public class TransactionActivitiesImpl implements TransactionActivities {
 
   @Override
   public Transaction initTransaction(Transaction tx) {
-    System.out.println("Initializing transaction");
-    sleep(2 * sleepmult);
+    // System.out.println("Initializing transaction");
+    sleep(30);
     if (tx.getAmount() <= 0) {
       // System.out.println("Invalid amount: " + tx.getAmount());
       throw ApplicationFailure.newNonRetryableFailure(
           "Non-retryable Activity Failure: Invalid Amount", "InvalidAmount");
     }
 
-    sleep(3 * sleepmult);
+    sleep(50);
     return tx;
   }
 
   @Override
   public void cancelTransaction(Transaction tx) {
-    System.out.println("Cancelling transaction");
-    sleep(30 * sleepmult);
-    System.out.println("Transaction cancelled");
+    // System.out.println("Cancelling transaction");
+    sleep(30);
+    // System.out.println("Transaction cancelled");
   }
 
   @Override
   public void completeTransaction(Transaction tx) {
-    System.out.println(
-        "Sending $"
-            + tx.getAmount()
-            + " from "
-            + tx.getSourceAccount()
-            + " to "
-            + tx.getTargetAccount());
-    sleep(200 * sleepmult);
-    System.out.println("Transaction completed successfully");
+    // System.out.println(
+    //     "Sending $"
+    //         + tx.getAmount()
+    //         + " from "
+    //         + tx.getSourceAccount()
+    //         + " to "
+    //         + tx.getTargetAccount());
+    sleep(200);
+    // System.out.println("Transaction completed successfully");
+  }
+
+  @Override
+  public Transaction mintTransactionIdMoreDelay(TransactionRequest request) {
+    // System.out.println("Minting transaction ID");
+    // Simulate transaction ID generation
+    String txId = "TXID" + String.format("%010d", (long) (Math.random() * 1_000_000_0000L));
+    sleep(100);
+    // System.out.println("Transaction ID minted: " + txId);
+    return new Transaction(
+        txId, request.getSourceAccount(), request.getTargetAccount(), request.getAmount());
+  }
+
+  @Override
+  public Transaction initTransactionMoreDelay(Transaction tx) {
+    // System.out.println("Initializing transaction");
+    sleep(300);
+    if (tx.getAmount() <= 0) {
+      // System.out.println("Invalid amount: " + tx.getAmount());
+      throw ApplicationFailure.newNonRetryableFailure(
+          "Non-retryable Activity Failure: Invalid Amount", "InvalidAmount");
+    }
+
+    sleep(500);
+    return tx;
+  }
+
+  @Override
+  public void cancelTransactionMoreDelay(Transaction tx) {
+    // System.out.println("Cancelling transaction");
+    sleep(300);
+    // System.out.println("Transaction cancelled");
+  }
+
+  @Override
+  public void completeTransactionMoreDelay(Transaction tx) {
+    // System.out.println(
+    //     "Sending $"
+    //         + tx.getAmount()
+    //         + " from "
+    //         + tx.getSourceAccount()
+    //         + " to "
+    //         + tx.getTargetAccount());
+    sleep(2000);
+    // System.out.println("Transaction completed successfully");
   }
 
   private void sleep(long millis) {

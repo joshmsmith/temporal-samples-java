@@ -35,4 +35,28 @@ public interface TransactionActivities {
 
   @ActivityMethod
   void completeTransaction(Transaction tx);
+
+  @ActivityMethod
+  Transaction mintTransactionIdNoDelay(TransactionRequest txRequest);
+
+  @ActivityMethod
+  Transaction initTransactionNoDelay(Transaction tx);
+
+  @ActivityMethod
+  void cancelTransactionNoDelay(Transaction tx);
+
+  @ActivityMethod
+  void completeTransactionNoDelay(Transaction tx);
+
+  @ActivityMethod
+  Transaction mintTransactionIdMoreDelay(TransactionRequest txRequest);
+
+  @ActivityMethod
+  Transaction initTransactionMoreDelay(Transaction tx);
+
+  @ActivityMethod
+  void cancelTransactionMoreDelay(Transaction tx);
+
+  @ActivityMethod
+  void completeTransactionMoreDelay(Transaction tx);
 }
