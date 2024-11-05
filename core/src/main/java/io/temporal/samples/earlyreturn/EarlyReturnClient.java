@@ -30,7 +30,7 @@ import io.temporal.serviceclient.WorkflowServiceStubs;
 public class EarlyReturnClient {
   private static final String TASK_QUEUE = "EarlyReturnTaskQueue";
   private static final String WORKFLOW_ID_PREFIX = "early-return-workflow-";
-  private static final int MAX_ATTEMPTS = 100;
+  private static final int MAX_ATTEMPTS = 10;
 
   public static void main(String[] args) {
     WorkflowClient client = setupWorkflowClient();
