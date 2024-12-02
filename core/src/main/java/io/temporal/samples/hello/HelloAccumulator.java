@@ -34,7 +34,10 @@ import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.worker.Worker;
 import io.temporal.worker.WorkerFactory;
 import io.temporal.workflow.SignalMethod;
+import io.temporal.workflow.UpdateMethod;
+import io.temporal.workflow.UpdateValidatorMethod;
 import io.temporal.workflow.Workflow;
+import io.temporal.workflow.WorkflowInit;
 import io.temporal.workflow.WorkflowInterface;
 import io.temporal.workflow.WorkflowMethod;
 import java.io.Serializable;
@@ -150,6 +153,16 @@ public class HelloAccumulator {
     // workflow receives an exit signal.
     @SignalMethod
     void exit();
+
+    // Define the workflow greeting update method. This method is executed when
+    // the workflow receives a greeting update.
+    @UpdateMethod
+    void sendAndValidateGreeting(Greeting greeting);
+
+    // Update validators are optional
+    // Validators must return void and accept the same argument types as the handler
+    @UpdateValidatorMethod(updateName = "sendAndValidateGreeting")
+    void greetingValidator(Greeting greeting);
   }
 
   /**
@@ -194,14 +207,19 @@ public class HelloAccumulator {
     boolean exitRequested = false;
     ArrayDeque<Greeting> unprocessedGreetings = new ArrayDeque<Greeting>();
 
-    @Override
-    public String accumulateGreetings(
+    @WorkflowInit
+    public AccumulatorWorkflowImpl(
         String bucketKeyInput, Deque<Greeting> greetingsInput, Set<String> allGreetingsSetInput) {
       bucketKey = bucketKeyInput;
       greetings = new ArrayDeque<Greeting>();
       allGreetingsSet = new HashSet<String>();
       greetings.addAll(greetingsInput);
       allGreetingsSet.addAll(allGreetingsSetInput);
+    }
+
+    @Override
+    public String accumulateGreetings(
+        String bucketKeyInput, Deque<Greeting> greetingsInput, Set<String> allGreetingsSetInput) {
 
       // If you want to wait for a fixed amount of time instead of a time after a
       // message
@@ -210,13 +228,17 @@ public class HelloAccumulator {
 
       // Main Workflow Loop:
       // - wait for signals to come in
-      // - every time a signal comes in, wait again for MAX_AWAIT_TIME
+      // - every time a signal comes in, process all signals then wait again for MAX_AWAIT_TIME
+      //     - if your use case is with a long timer and you need less responsive signal processing,
+      //     - you may want to just wait for a fixed time and then process signals, that means less
+      // timers
+      //     - you can do that by taking out the unprocessedGreetings.isEmpty() in the await() below
       // - if time runs out, and there are no messages, process them all and exit
-      // - if exit signal is received, process any remaining signals and exit
+      // - if exit signal is received, process any remaining signals and exit (no more waiting)
       do {
-
-        boolean timedout =
-            !Workflow.await(MAX_AWAIT_TIME, () -> !unprocessedGreetings.isEmpty() || exitRequested);
+        boolean conditionMet =
+            Workflow.await(MAX_AWAIT_TIME, () -> !unprocessedGreetings.isEmpty() || exitRequested);
+        boolean timedout = !conditionMet;
 
         while (!unprocessedGreetings.isEmpty()) {
           processGreeting(unprocessedGreetings.removeFirst());
@@ -225,19 +247,19 @@ public class HelloAccumulator {
         if (exitRequested || timedout) {
           String greetEveryone = processGreetings(greetings);
 
-          if (unprocessedGreetings.isEmpty()) {
-            logger.info("Greeting queue is still empty");
+          if (Workflow.isEveryHandlerFinished() && unprocessedGreetings.isEmpty()) {
+            logger.info("Greeting queue is still empty, ok to exit.");
             return greetEveryone;
           } else {
             // you can get here if you send a signal after an exit, causing rollback just
             // after the
             // last processed activity
-            logger.info("Greeting queue not empty, looping");
+            logger.warn("Greeting queue not empty, looping.");
           }
         }
       } while (!unprocessedGreetings.isEmpty() || !Workflow.getInfo().isContinueAsNewSuggested());
 
-      logger.info("starting continue as new processing");
+      logger.info("Starting continue as new processing.");
 
       // Create a workflow stub that will be used to continue this workflow as a new
       AccumulatorWorkflow continueAsNew = Workflow.newContinueAsNewStub(AccumulatorWorkflow.class);
@@ -249,7 +271,7 @@ public class HelloAccumulator {
       // after this, it will fail the workflow task and retry handling the new
       // signal(s)
 
-      return "continued as new; results passed to next run";
+      return "Continued as new; results passed to next run.";
     }
 
     // Here is where we can process individual signals as they come in.
@@ -257,18 +279,17 @@ public class HelloAccumulator {
     // This also validates an individual greeting:
     // - check for duplicates
     // - check for correct bucket
+    // - check out the Update feature which can validate before accepting an update
     public void processGreeting(Greeting greeting) {
-      logger.info("processing greeting-" + greeting);
       if (greeting == null) {
         logger.warn("Greeting is null:" + greeting);
         return;
       }
 
-      // this just ignores incorrect buckets - you can use workflowupdate to validate
-      // and reject
-      // bad bucket requests if needed
+      // This just ignores incorrect buckets - you can use workflowupdate to validate
+      // and reject bad bucket requests if needed
       if (!greeting.bucket.equals(bucketKey)) {
-        logger.warn("wrong bucket, something is wrong with your signal processing: " + greeting);
+        logger.warn("Wrong bucket, something is wrong with your signal processing: " + greeting);
         return;
       }
 
@@ -277,7 +298,7 @@ public class HelloAccumulator {
         return;
       }
 
-      // add in any desired event processing activity here
+      // Include in any desired event processing activity here
       greetings.add(greeting);
     }
 
@@ -287,22 +308,47 @@ public class HelloAccumulator {
     }
 
     // Signal method
-    // Keep it simple, these should be fast and not call activities
+    // Keep it simple, these should generally be fast and not call activities
     @Override
     public void sendGreeting(Greeting greeting) {
-      // signals can be the first workflow code that runs, make sure we have
-      // an ArrayDeque to write to
-      if (unprocessedGreetings == null) {
-        unprocessedGreetings = new ArrayDeque<Greeting>();
-      }
       logger.info("received greeting-" + greeting);
       unprocessedGreetings.add(greeting);
     }
 
     @Override
     public void exit() {
-      logger.info("exit signal received");
+      logger.info("Exit signal received");
       exitRequested = true;
+    }
+
+    // Update Method Implementation
+    // called when the workflow receives a greeting update.
+    @Override
+    public void sendAndValidateGreeting(Greeting greeting) {
+      logger.info("received greeting-" + greeting);
+      unprocessedGreetings.add(greeting);
+    }
+
+    // Define Update validator.
+    // Update validators are optional.
+    // Validators must return void and accept the same argument types as the handler.
+    // To reject an Update, throw an exception of any type in the validator.
+    // Without a validator, Updates are always accepted.
+    @Override
+    public void greetingValidator(Greeting greeting) {
+
+      if (greeting == null) {
+        throw new RuntimeException("Greeting is null:" + greeting);
+      }
+
+      if (!greeting.bucket.equals(bucketKey)) {
+        throw new RuntimeException(
+            "Wrong bucket, something is wrong with your update sending: " + greeting);
+      }
+
+      if (!allGreetingsSet.add(greeting.greetingKey)) {
+        throw new RuntimeException("Duplicate greeting: " + greeting.greetingKey);
+      }
     }
   }
 
@@ -591,24 +637,7 @@ public class HelloAccumulator {
   }
 
   private static void printWorkflowStatus(WorkflowClient client, String workflowId) {
-    WorkflowStub existingUntyped =
-        client.newUntypedWorkflowStub(workflowId, Optional.empty(), Optional.empty());
-    DescribeWorkflowExecutionRequest describeWorkflowExecutionRequest =
-        DescribeWorkflowExecutionRequest.newBuilder()
-            .setNamespace(client.getOptions().getNamespace())
-            .setExecution(existingUntyped.getExecution())
-            .build();
-
-    DescribeWorkflowExecutionResponse resp =
-        client
-            .getWorkflowServiceStubs()
-            .blockingStub()
-            .describeWorkflowExecution(describeWorkflowExecutionRequest);
-    System.out.println(
-        "**** PARENT: " + resp.getWorkflowExecutionInfo().getParentExecution().getWorkflowId());
-
-    WorkflowExecutionInfo workflowExecutionInfo = resp.getWorkflowExecutionInfo();
-    System.out.println("Workflow Status: " + workflowExecutionInfo.getStatus().toString());
+    System.out.println("Workflow Status: " + getWorkflowStatus(client, workflowId));
   }
 
   private static String getWorkflowStatus(WorkflowClient client, String workflowId) {
@@ -625,8 +654,6 @@ public class HelloAccumulator {
             .getWorkflowServiceStubs()
             .blockingStub()
             .describeWorkflowExecution(describeWorkflowExecutionRequest);
-    System.out.println(
-        "**** PARENT: " + resp.getWorkflowExecutionInfo().getParentExecution().getWorkflowId());
 
     WorkflowExecutionInfo workflowExecutionInfo = resp.getWorkflowExecutionInfo();
     return workflowExecutionInfo.getStatus().toString();
