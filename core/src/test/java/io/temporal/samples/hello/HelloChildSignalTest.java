@@ -22,14 +22,19 @@ package io.temporal.samples.hello;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.*;
 
+import io.temporal.api.workflow.v1.WorkflowExecutionInfo;
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionRequest;
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionResponse;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.client.WorkflowStub;
 import io.temporal.samples.hello.HelloChildSignal.GreetingChild;
 import io.temporal.samples.hello.HelloChildSignal.GreetingChildImpl;
 import io.temporal.samples.hello.HelloChildSignal.GreetingWorkflow;
 import io.temporal.samples.hello.HelloChildSignal.GreetingWorkflowImpl;
 import io.temporal.testing.TestWorkflowRule;
 import java.time.Duration;
+import java.util.Optional;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -54,14 +59,11 @@ public class HelloChildSignalTest {
             .newWorkflowStub(
                 GreetingWorkflow.class,
                 WorkflowOptions.newBuilder().setTaskQueue(testWorkflowRule.getTaskQueue()).build());
-    // notes from Block
-    // problem 1: start parent, 1 child waits in catch for an hour but env.sleep
-    // env.sleep() doesn't skip time just sleeps
 
     // start parent
     WorkflowClient.start(workflow::getGreeting, "World");
 
-    // interesting that you can't find the child here, you have to wait for parent
+    // interesting that you can't find the child here, you have to wait for parent to finish
 
     // block for results from Parent
     String greeting = workflow.getGreeting("World");
@@ -82,7 +84,7 @@ public class HelloChildSignalTest {
   }
 
   @Test
-  public void testChildAwaitTimeout() {
+  public void testChildAwaitTimeoutForSignal() {
     testWorkflowRule
         .getWorker()
         .registerWorkflowImplementationTypes(GreetingWorkflowImpl.class, GreetingChildImpl.class);
@@ -95,14 +97,11 @@ public class HelloChildSignalTest {
             .newWorkflowStub(
                 GreetingWorkflow.class,
                 WorkflowOptions.newBuilder().setTaskQueue(testWorkflowRule.getTaskQueue()).build());
-    // notes from Block
-    // problem 1: start parent, 1 child waits in catch for an hour but env.sleep
-    // env.sleep() doesn't skip time just sleeps
 
     // start parent
     WorkflowClient.start(workflow::getGreeting, "World");
-    // wait
-    testWorkflowRule.getTestEnvironment().sleep(Duration.ofMinutes(50));
+    // skip time: wait for parent to start children or you won't find the child in the next step
+    testWorkflowRule.getTestEnvironment().sleep(Duration.ofMinutes(1));
 
     String childResult =
         testWorkflowRule
@@ -121,7 +120,7 @@ public class HelloChildSignalTest {
   }
 
   @Test
-  public void testChildSignalParent() {
+  public void testParentSignaling() {
     testWorkflowRule
         .getWorker()
         .registerWorkflowImplementationTypes(GreetingWorkflowImpl.class, GreetingChildImpl.class);
@@ -138,20 +137,17 @@ public class HelloChildSignalTest {
     // start parent
     WorkflowClient.start(workflow::getGreeting, "World");
 
-    // skip time so child start
-    testWorkflowRule.getTestEnvironment().sleep(Duration.ofMinutes(20));
-
     // signal parent so children can start
     workflow.sendGreeting("asdf");
+
+    // skip time so child workflows start - without this sleep children won't be started yet
+    testWorkflowRule.getTestEnvironment().sleep(Duration.ofMinutes(1));
 
     String childResult =
         testWorkflowRule
             .getWorkflowClient()
             .newUntypedWorkflowStub("Child1")
             .getResult(String.class);
-
-    // signal parent again
-    workflow.sendGreeting("asdf2");
 
     // block for results from Parent
     String greeting = workflow.getGreeting("World");
@@ -179,38 +175,38 @@ public class HelloChildSignalTest {
                 GreetingWorkflow.class,
                 WorkflowOptions.newBuilder().setTaskQueue(testWorkflowRule.getTaskQueue()).build());
 
-    // notes from Block
-
     // problem 2: try to find children, signal one, get results from both, see what happens
     // getting workflow not found exception
 
     // start parent
     WorkflowClient.start(workflow::getGreeting, "World");
 
-    // wait
-    testWorkflowRule.getTestEnvironment().sleep(Duration.ofMinutes(50));
+    // wait for children to start - without this you won't find the child workflow below
+    testWorkflowRule.getTestEnvironment().sleep(Duration.ofMinutes(1));
 
     // signal parent
     workflow.sendGreeting("asdf");
 
+    GreetingChild childWorkflow =
+        testWorkflowRule.getWorkflowClient().newWorkflowStub(GreetingChild.class, "Child1");
     // signal child
-    testWorkflowRule
-        .getWorkflowClient()
-        .newWorkflowStub(GreetingChild.class, "Child1")
-        .sendGreeting("oranges");
 
-    String childResult =
+    childWorkflow.sendGreeting("oranges");
+
+    String childResultFromUntyped =
         testWorkflowRule
             .getWorkflowClient()
             .newUntypedWorkflowStub("Child1")
             .getResult(String.class);
+    String childResultFromTyped = childWorkflow.composeGreeting("Hello2", "World");
 
     // block for results from Parent
     String greeting = workflow.getGreeting("World");
     // verify results
     // assertEquals(childResult, "yikes no signal");
 
-    assertEquals(childResult, "Hello1 World!");
+    assertEquals(childResultFromUntyped, "Hello1 World!");
+    assertEquals(childResultFromTyped, "Hello1 World!");
 
     assertEquals("Hello2 World!", greeting);
 
@@ -218,12 +214,13 @@ public class HelloChildSignalTest {
   }
 
   @Test
-  public void testChildAfterParentWFTimeout() {
+  public void testChildSignalAfterParentWFTimeout() {
     testWorkflowRule
         .getWorker()
         .registerWorkflowImplementationTypes(GreetingWorkflowImpl.class, GreetingChildImpl.class);
     testWorkflowRule.getTestEnvironment().start();
 
+    String parentWorkflowID = "Parent";
     // Get a workflow stub using the same task queue the worker uses.
     GreetingWorkflow workflow =
         testWorkflowRule
@@ -232,10 +229,12 @@ public class HelloChildSignalTest {
                 GreetingWorkflow.class,
                 WorkflowOptions.newBuilder()
                     .setTaskQueue(testWorkflowRule.getTaskQueue())
+                    .setWorkflowId(parentWorkflowID)
                     .setWorkflowExecutionTimeout(Duration.ofMinutes(55))
                     .build());
 
-    // notes from Block
+    // problem 1: start parent, 1 child waits in catch for an hour but testenv.sleep doesn't skip
+    // time just sleeps
 
     // problem 3: parent workflow times out, try to find children, signal one, get results from
     // both, see what happens
@@ -247,8 +246,9 @@ public class HelloChildSignalTest {
     // signal parent
     workflow.sendGreeting("asdf");
 
-    // wait for parent to time
+    // wait for parent to time out
     testWorkflowRule.getTestEnvironment().sleep(Duration.ofMinutes(56));
+
     // signal child
     testWorkflowRule
         .getWorkflowClient()
@@ -260,54 +260,40 @@ public class HelloChildSignalTest {
             .getWorkflowClient()
             .newUntypedWorkflowStub("Child1")
             .getResult(String.class);
-            assertEquals(childResult, "Hello1 World!");
+    assertEquals(childResult, "Hello1 World!");
 
-    
+    WorkflowStub parentStub =
+        testWorkflowRule
+            .getWorkflowClient()
+            .newUntypedWorkflowStub(parentWorkflowID, Optional.empty(), Optional.empty());
+    DescribeWorkflowExecutionRequest describeWorkflowExecutionRequest =
+        DescribeWorkflowExecutionRequest.newBuilder()
+            .setNamespace(testWorkflowRule.getWorkflowClient().getOptions().getNamespace())
+            .setExecution(parentStub.getExecution())
+            .build();
+
+    DescribeWorkflowExecutionResponse resp =
+        testWorkflowRule
+            .getWorkflowClient()
+            .getWorkflowServiceStubs()
+            .blockingStub()
+            .describeWorkflowExecution(describeWorkflowExecutionRequest);
+
+    WorkflowExecutionInfo workflowExecutionInfo = resp.getWorkflowExecutionInfo();
+    String parentStatus = workflowExecutionInfo.getStatus().toString();
+    assertEquals("WORKFLOW_EXECUTION_STATUS_TIMED_OUT", parentStatus);
+    // DescribeWorkflowExecutionRequest parentRequest =
+    // DescribeWorkflowExecutionRequest.newBuilder()
+    //   .setNamespace(testWorkflowEnv.workflowClient.options.namespace)
+    //   .setExecution(WorkflowExecution.newBuilder().setWorkflowId(workflowId).build())
+    //   .build()
+    // DescribeWorkflowExecutionResponse parentResponse =
+    // testWorkflowRule.getWorkflowClient().WorkflowServiceStubs.blockingStub().describeWorkflowExecution(request);
     // block for results from Parent
-    String greeting = workflow.getGreeting("World");
+    // String greeting = workflow.getGreeting("World");
 
-
-    assertEquals("Hello2 World!", greeting);
+    // assertEquals("Hello2 World!", greeting);
 
     testWorkflowRule.getTestEnvironment().shutdown();
   }
-
-  //   @Test
-  //   public void testMockedChild() {
-  //
-  // testWorkflowRule.getWorker().registerWorkflowImplementationTypes(GreetingWorkflowImpl.class);
-
-  //     // As new mock is created on each workflow task the only last one is useful to verify
-  // calls.
-  //     AtomicReference<GreetingChild> lastChildMock = new AtomicReference<>();
-  //     // Factory is called to create a new workflow object on each workflow task.
-  //     testWorkflowRule
-  //         .getWorker()
-  //         .registerWorkflowImplementationFactory(
-  //             GreetingChild.class,
-  //             () -> {
-  //               GreetingChild child = mock(GreetingChild.class);
-  //               when(child.composeGreeting("Hello", "World")).thenReturn("Hello World!");
-  //               lastChildMock.set(child);
-  //               return child;
-  //             });
-
-  //     testWorkflowRule.getTestEnvironment().start();
-
-  //     // Get a workflow stub using the same task queue the worker uses.
-  //     GreetingWorkflow workflow =
-  //         testWorkflowRule
-  //             .getWorkflowClient()
-  //             .newWorkflowStub(
-  //                 GreetingWorkflow.class,
-  //
-  // WorkflowOptions.newBuilder().setTaskQueue(testWorkflowRule.getTaskQueue()).build());
-  //     // Execute a workflow waiting for it to complete.
-  //     String greeting = workflow.getGreeting("World");
-  //     assertEquals("Hello World!", greeting);
-  //     GreetingChild mock = lastChildMock.get();
-  //     verify(mock).composeGreeting(eq("Hello"), eq("World"));
-
-  //     testWorkflowRule.getTestEnvironment().shutdown();
-  //   }
 }

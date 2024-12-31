@@ -110,6 +110,7 @@ public class HelloChildSignal {
               ChildWorkflowOptions.newBuilder()
                   .setWorkflowId("Child2")
                   .setParentClosePolicy(ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON)
+                  .setWorkflowRunTimeout(Duration.ofHours(2))
                   .build());
 
       // This is a non blocking call that returns immediately.
@@ -124,7 +125,9 @@ public class HelloChildSignal {
       Promise<String> greeting1 = Async.function(child1::composeGreeting, "Hello1", name);
       Promise<String> greeting2 = Async.function(child2::composeGreeting, "Hello2", name);
 
+      // wait for signals
       Workflow.await(Duration.ofMinutes(2), () -> gotGreeting);
+
       // Wait for the child workflow to complete and return its results
       String g1 = greeting1.get();
       String g2 = greeting2.get();
@@ -151,7 +154,7 @@ public class HelloChildSignal {
     @Override
     public String composeGreeting(String greeting, String name) {
       if (greeting.equals("Hello1")) {
-        boolean conditionMet = Workflow.await(Duration.ofMinutes(62), () -> gotGreeting);
+        boolean conditionMet = Workflow.await(Duration.ofHours(1), () -> gotGreeting);
         if (!conditionMet) return "yikes no signal";
       }
 
