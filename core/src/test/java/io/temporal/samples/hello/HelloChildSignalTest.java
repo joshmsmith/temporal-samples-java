@@ -175,9 +175,6 @@ public class HelloChildSignalTest {
                 GreetingWorkflow.class,
                 WorkflowOptions.newBuilder().setTaskQueue(testWorkflowRule.getTaskQueue()).build());
 
-    // problem 2: try to find children, signal one, get results from both, see what happens
-    // getting workflow not found exception
-
     // start parent
     WorkflowClient.start(workflow::getGreeting, "World");
 
@@ -233,13 +230,6 @@ public class HelloChildSignalTest {
                     .setWorkflowExecutionTimeout(Duration.ofMinutes(55))
                     .build());
 
-    // problem 1: start parent, 1 child waits in catch for an hour but testenv.sleep doesn't skip
-    // time just sleeps
-
-    // problem 3: parent workflow times out, try to find children, signal one, get results from
-    // both, see what happens
-    // getting workflow not found exception
-
     // start parent
     WorkflowClient.start(workflow::getGreeting, "World");
 
@@ -282,17 +272,6 @@ public class HelloChildSignalTest {
     WorkflowExecutionInfo workflowExecutionInfo = resp.getWorkflowExecutionInfo();
     String parentStatus = workflowExecutionInfo.getStatus().toString();
     assertEquals("WORKFLOW_EXECUTION_STATUS_TIMED_OUT", parentStatus);
-    // DescribeWorkflowExecutionRequest parentRequest =
-    // DescribeWorkflowExecutionRequest.newBuilder()
-    //   .setNamespace(testWorkflowEnv.workflowClient.options.namespace)
-    //   .setExecution(WorkflowExecution.newBuilder().setWorkflowId(workflowId).build())
-    //   .build()
-    // DescribeWorkflowExecutionResponse parentResponse =
-    // testWorkflowRule.getWorkflowClient().WorkflowServiceStubs.blockingStub().describeWorkflowExecution(request);
-    // block for results from Parent
-    // String greeting = workflow.getGreeting("World");
-
-    // assertEquals("Hello2 World!", greeting);
 
     testWorkflowRule.getTestEnvironment().shutdown();
   }
