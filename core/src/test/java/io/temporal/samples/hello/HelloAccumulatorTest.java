@@ -27,9 +27,11 @@ import io.temporal.client.WorkflowOptions;
 import io.temporal.samples.hello.HelloAccumulator.Greeting;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.testing.TestWorkflowRule;
+import io.temporal.workflow.Workflow;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.Random;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -147,6 +149,67 @@ public class HelloAccumulatorTest {
     assert results.contains("Hello (2)");
     assert results.contains("XVX Robot");
     assert results.contains("Han Robot");
+  }
+
+  @Test
+  public void testContinueAsNew() {
+    String bucket = "blue";
+
+    ArrayDeque<Greeting> greetingList = new ArrayDeque<Greeting>();
+    HashSet<String> allGreetingsSet = new HashSet<String>();
+    testEnv = testWorkflowRule.getTestEnvironment();
+    testEnv.start();
+
+    String workflowID = "accumulate-" + bucket;
+    HelloAccumulator.AccumulatorWorkflow workflow =
+        testWorkflowRule
+            .getWorkflowClient()
+            .newWorkflowStub(
+                HelloAccumulator.AccumulatorWorkflow.class,
+                WorkflowOptions.newBuilder()
+                    .setTaskQueue(testWorkflowRule.getTaskQueue())
+                    .setWorkflowId(workflowID)
+                    .build());
+
+    WorkflowClient.start(workflow::accumulateGreetings, bucket, greetingList, allGreetingsSet);
+
+    String originalRunID = Workflow.getInfo().getRunId();
+
+    // WorkflowStub wfStub =
+    //     testWorkflowRule
+    //         .getWorkflowClient()
+    //         .newUntypedWorkflowStub(workflowID, Optional.empty(), Optional.empty());
+    // DescribeWorkflowExecutionRequest describeWorkflowExecutionRequest =
+    //     DescribeWorkflowExecutionRequest.newBuilder()
+    //         .setNamespace(testWorkflowRule.getWorkflowClient().getOptions().getNamespace())
+    //         .setExecution(wfStub.getExecution())
+    //         .build();
+
+    // DescribeWorkflowExecutionResponse resp =
+    //     testWorkflowRule
+    //         .getWorkflowClient()
+    //         .getWorkflowServiceStubs()
+    //         .blockingStub()
+    //         .describeWorkflowExecution(describeWorkflowExecutionRequest);
+
+    // WorkflowExecutionInfo workflowExecutionInfo = resp.getWorkflowExecutionInfo();
+    // String runID = workflowExecutionInfo.getFirstRunId();
+    // workflowExecutionInfo.getrunID
+    // String wfStatus = workflowExecutionInfo.getStatus().toString();
+    // assertEquals("WORKFLOW_EXECUTION_STATUS_TIMED_OUT", parentStatus);
+
+    for (int i = 0; i < 2000; i++) {
+
+      Random randomName = new Random();
+      workflow.sendGreeting(new Greeting("Robot #" + i, bucket, "key" + i));
+    }
+
+    String results = workflow.accumulateGreetings(bucket, greetingList, allGreetingsSet);
+
+    String latestRunID = Workflow.getInfo().getRunId();
+    assert !latestRunID.equals(originalRunID);
+    assert results.contains("Hello (2000)");
+    assert results.contains("Robot #2000");
   }
 
   @Test
