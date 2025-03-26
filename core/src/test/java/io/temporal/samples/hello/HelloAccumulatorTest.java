@@ -21,16 +21,23 @@ package io.temporal.samples.hello;
 
 import static io.temporal.samples.hello.HelloAccumulator.MAX_AWAIT_TIME;
 
+import io.temporal.api.enums.v1.WorkflowIdReusePolicy;
+import io.temporal.api.workflow.v1.WorkflowExecutionInfo;
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionRequest;
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionResponse;
 import io.temporal.client.BatchRequest;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.client.WorkflowStub;
 import io.temporal.samples.hello.HelloAccumulator.Greeting;
+import io.temporal.testing.TestEnvironmentOptions;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.testing.TestWorkflowRule;
 import io.temporal.workflow.Workflow;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Random;
 import org.junit.Rule;
 import org.junit.Test;
@@ -53,6 +60,10 @@ public class HelloAccumulatorTest {
     ArrayDeque<Greeting> greetingList = new ArrayDeque<Greeting>();
     HashSet<String> allGreetingsSet = new HashSet<String>();
     testEnv = testWorkflowRule.getTestEnvironment();
+    long millis = System.currentTimeMillis() - 10000;
+    testEnv =
+        TestWorkflowEnvironment.newInstance(
+            TestEnvironmentOptions.newBuilder().setInitialTimeMillis(millis).build());
     testEnv.start();
 
     HelloAccumulator.AccumulatorWorkflow workflow =
@@ -60,7 +71,10 @@ public class HelloAccumulatorTest {
             .getWorkflowClient()
             .newWorkflowStub(
                 HelloAccumulator.AccumulatorWorkflow.class,
-                WorkflowOptions.newBuilder().setTaskQueue(testWorkflowRule.getTaskQueue()).build());
+                WorkflowOptions.newBuilder()
+                    .setWorkflowId("accumConflict")
+                    .setTaskQueue(testWorkflowRule.getTaskQueue())
+                    .build());
 
     WorkflowClient.start(workflow::accumulateGreetings, bucket, greetingList, allGreetingsSet);
 
@@ -71,6 +85,113 @@ public class HelloAccumulatorTest {
     String results = workflow.accumulateGreetings(bucket, greetingList, allGreetingsSet);
     assert results.contains("Hello (1)");
     assert results.contains("XVX Robot");
+
+    WorkflowStub stub =
+        testWorkflowRule
+            .getWorkflowClient()
+            .newUntypedWorkflowStub("accum", Optional.empty(), Optional.empty());
+    DescribeWorkflowExecutionRequest describeWorkflowExecutionRequest =
+        DescribeWorkflowExecutionRequest.newBuilder()
+            .setNamespace(testWorkflowRule.getWorkflowClient().getOptions().getNamespace())
+            .setExecution(stub.getExecution())
+            .build();
+    DescribeWorkflowExecutionResponse resp =
+        testWorkflowRule
+            .getWorkflowClient()
+            .getWorkflowServiceStubs()
+            .blockingStub()
+            .describeWorkflowExecution(describeWorkflowExecutionRequest);
+
+    WorkflowExecutionInfo workflowExecutionInfo = resp.getWorkflowExecutionInfo();
+
+    com.google.protobuf.Timestamp starttime = workflowExecutionInfo.getStartTime();
+    assert (com.google.protobuf.util.Timestamps.toMillis(starttime) < System.currentTimeMillis());
+    assert (com.google.protobuf.util.Timestamps.toMillis(starttime) > millis);
+
+    String status = workflowExecutionInfo.getStatus().toString();
+    assert ("WORKFLOW_EXECUTION_STATUS_TIMED_OUT".equals(status));
+
+    HelloAccumulator.AccumulatorWorkflow workflowConflict =
+        testWorkflowRule
+            .getWorkflowClient()
+            .newWorkflowStub(
+                HelloAccumulator.AccumulatorWorkflow.class,
+                WorkflowOptions.newBuilder()
+                    .setTaskQueue(testWorkflowRule.getTaskQueue())
+                    .setWorkflowId("accumConflict")
+                    .build());
+
+    Greeting starterGreeting = new Greeting("Robby Robot", bucket, "112");
+    BatchRequest request = testWorkflowRule.getWorkflowClient().newSignalWithStartRequest();
+    request.add(workflow::accumulateGreetings, bucket, greetingList, allGreetingsSet);
+    request.add(workflow::sendGreeting, starterGreeting);
+    testWorkflowRule.getWorkflowClient().signalWithStart(request);
+
+    String resultsConflict =
+        workflowConflict.accumulateGreetings(bucket, greetingList, allGreetingsSet);
+    assert resultsConflict.contains("Hello (1)");
+    assert resultsConflict.contains("Robby Robot");
+  }
+
+  @Test
+  public void testConflictsWorkflow() {
+    String bucket = "blue";
+
+    ArrayDeque<Greeting> greetingList = new ArrayDeque<Greeting>();
+    HashSet<String> allGreetingsSet = new HashSet<String>();
+    testEnv = testWorkflowRule.getTestEnvironment();
+    long millis = System.currentTimeMillis() - 10000;
+    testEnv =
+        TestWorkflowEnvironment.newInstance(
+            TestEnvironmentOptions.newBuilder().setInitialTimeMillis(millis).build());
+    testEnv.start();
+
+    HelloAccumulator.AccumulatorWorkflow workflow =
+        testWorkflowRule
+            .getWorkflowClient()
+            .newWorkflowStub(
+                HelloAccumulator.AccumulatorWorkflow.class,
+                WorkflowOptions.newBuilder()
+                    .setWorkflowId("accum")
+                    .setTaskQueue(testWorkflowRule.getTaskQueue())
+                    .setWorkflowIdReusePolicy(
+                        WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE)
+                    .build());
+
+    WorkflowClient.start(workflow::accumulateGreetings, bucket, greetingList, allGreetingsSet);
+
+    Greeting xvxGreeting = new Greeting("XVX Robot", bucket, "1123581321");
+
+    workflow.sendGreeting(xvxGreeting);
+
+    String results = workflow.accumulateGreetings(bucket, greetingList, allGreetingsSet);
+    assert results.contains("Hello (1)");
+    assert results.contains("XVX Robot");
+
+    WorkflowStub parentStub =
+        testWorkflowRule
+            .getWorkflowClient()
+            .newUntypedWorkflowStub("accum", Optional.empty(), Optional.empty());
+    DescribeWorkflowExecutionRequest describeWorkflowExecutionRequest =
+        DescribeWorkflowExecutionRequest.newBuilder()
+            .setNamespace(testWorkflowRule.getWorkflowClient().getOptions().getNamespace())
+            .setExecution(parentStub.getExecution())
+            .build();
+    DescribeWorkflowExecutionResponse resp =
+        testWorkflowRule
+            .getWorkflowClient()
+            .getWorkflowServiceStubs()
+            .blockingStub()
+            .describeWorkflowExecution(describeWorkflowExecutionRequest);
+
+    WorkflowExecutionInfo workflowExecutionInfo = resp.getWorkflowExecutionInfo();
+
+    com.google.protobuf.Timestamp starttime = workflowExecutionInfo.getStartTime();
+    assert (com.google.protobuf.util.Timestamps.toMillis(starttime) < System.currentTimeMillis());
+    assert (com.google.protobuf.util.Timestamps.toMillis(starttime) > millis);
+
+    String parentStatus = workflowExecutionInfo.getStatus().toString();
+    // assertEquals("WORKFLOW_EXECUTION_STATUS_TIMED_OUT", parentStatus);
   }
 
   @Test
