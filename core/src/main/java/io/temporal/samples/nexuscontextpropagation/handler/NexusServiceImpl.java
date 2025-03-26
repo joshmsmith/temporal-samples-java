@@ -17,7 +17,7 @@
  *  permissions and limitations under the License.
  */
 
-package io.temporal.samples.nexus.handler;
+package io.temporal.samples.nexuscontextpropagation.handler;
 
 import io.nexusrpc.handler.OperationHandler;
 import io.nexusrpc.handler.OperationImpl;
@@ -25,13 +25,19 @@ import io.nexusrpc.handler.ServiceImpl;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.nexus.Nexus;
 import io.temporal.nexus.WorkflowRunOperation;
+import io.temporal.samples.nexus.handler.HelloHandlerWorkflow;
 import io.temporal.samples.nexus.service.NexusService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 // To create a service implementation, annotate the class with @ServiceImpl and provide the
 // interface that the service implements. The service implementation class should have methods that
 // return OperationHandler that correspond to the operations defined in the service interface.
 @ServiceImpl(service = NexusService.class)
 public class NexusServiceImpl {
+  private static final Logger logger = LoggerFactory.getLogger(NexusServiceImpl.class);
+
   @OperationImpl
   public OperationHandler<NexusService.EchoInput, NexusService.EchoOutput> echo() {
     // OperationHandler.sync is a meant for exposing simple RPC handlers.
@@ -41,7 +47,13 @@ public class NexusServiceImpl {
         // calling
         // Nexus.getOperationContext().getWorkflowClient(ctx) to make arbitrary calls such as
         // signaling, querying, or listing workflows.
-        (ctx, details, input) -> new NexusService.EchoOutput(input.getMessage()));
+        (ctx, details, input) -> {
+          if (MDC.get("x-nexus-caller-workflow-id") != null) {
+            logger.info(
+                "Echo called from a workflow with ID : {}", MDC.get("x-nexus-caller-workflow-id"));
+          }
+          return new NexusService.EchoOutput(input.getMessage());
+        });
   }
 
   @OperationImpl

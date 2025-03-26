@@ -17,13 +17,18 @@
  *  permissions and limitations under the License.
  */
 
-package io.temporal.samples.nexus.caller;
+package io.temporal.samples.nexuscontextpropagation.caller;
 
 import io.temporal.api.common.v1.WorkflowExecution;
 import io.temporal.client.WorkflowClient;
+import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.samples.nexus.caller.EchoCallerWorkflow;
+import io.temporal.samples.nexus.caller.HelloCallerWorkflow;
 import io.temporal.samples.nexus.options.ClientOptions;
 import io.temporal.samples.nexus.service.NexusService;
+import io.temporal.samples.nexuscontextpropagation.propagation.MDCContextPropagator;
+import java.util.Collections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +36,11 @@ public class CallerStarter {
   private static final Logger logger = LoggerFactory.getLogger(CallerStarter.class);
 
   public static void main(String[] args) {
-    WorkflowClient client = ClientOptions.getWorkflowClient(args);
+    WorkflowClient client =
+        ClientOptions.getWorkflowClient(
+            args,
+            WorkflowClientOptions.newBuilder()
+                .setContextPropagators(Collections.singletonList(new MDCContextPropagator())));
 
     WorkflowOptions workflowOptions =
         WorkflowOptions.newBuilder().setTaskQueue(CallerWorker.DEFAULT_TASK_QUEUE_NAME).build();

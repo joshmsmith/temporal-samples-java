@@ -19,11 +19,9 @@
 
 package io.temporal.samples.nexus.options;
 
-import io.grpc.Metadata;
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContextBuilder;
 import io.grpc.netty.shaded.io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import io.grpc.stub.MetadataUtils;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
@@ -34,7 +32,13 @@ import javax.net.ssl.SSLException;
 import org.apache.commons.cli.*;
 
 public class ClientOptions {
+
   public static WorkflowClient getWorkflowClient(String[] args) {
+    return getWorkflowClient(args, WorkflowClientOptions.newBuilder());
+  }
+
+  public static WorkflowClient getWorkflowClient(
+      String[] args, WorkflowClientOptions.Builder clientOptions) {
     Options options = new Options();
     Option targetHostOption = new Option("target-host", true, "Host:port for the Temporal service");
     targetHostOption.setRequired(false);
@@ -137,19 +141,10 @@ public class ClientOptions {
     if (!apiKey.isEmpty()) {
       serviceStubOptionsBuilder.setEnableHttps(true);
       serviceStubOptionsBuilder.addApiKey(() -> apiKey);
-      Metadata.Key<String> TEMPORAL_NAMESPACE_HEADER_KEY =
-          Metadata.Key.of("temporal-namespace", Metadata.ASCII_STRING_MARSHALLER);
-      Metadata metadata = new Metadata();
-      metadata.put(TEMPORAL_NAMESPACE_HEADER_KEY, namespace);
-      serviceStubOptionsBuilder.setChannelInitializer(
-          (channel) -> {
-            channel.intercept(MetadataUtils.newAttachHeadersInterceptor(metadata));
-          });
     }
 
     WorkflowServiceStubs service =
         WorkflowServiceStubs.newServiceStubs(serviceStubOptionsBuilder.build());
-    return WorkflowClient.newInstance(
-        service, WorkflowClientOptions.newBuilder().setNamespace(namespace).build());
+    return WorkflowClient.newInstance(service, clientOptions.setNamespace(namespace).build());
   }
 }
